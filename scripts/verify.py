@@ -13,7 +13,7 @@ from silhouette_ar.segmentation import connected_instances
 
 
 def main():
-    output = Path("outputs/smoke").resolve(); output.mkdir(parents=True, exist_ok=True)
+    output = Path("outputs/verify").resolve(); output.mkdir(parents=True, exist_ok=True)
     mask = np.zeros((100, 120), np.uint8); mask[42:89, 40:81] = 1
     instances = connected_instances(mask, "demo-object", min_area=100)
     meshes = build_meshes(instances, CameraIntrinsics(100, 100, 60, 50),
@@ -41,7 +41,7 @@ def main():
                     "--cx", "60", "--cy", "50", "--camera-height", "1.4", "--output", str(cli_output)],
                    check=True, env=environment)
     assert json.loads(cli_output.read_text(encoding="utf-8"))[0]["label"] == "demo-object"
-    print(f"smoke passed: vertices={len(mesh.vertices_world)}; path-points={len(path)}; artifacts -> {output}")
+    print(f"verification passed: vertices={len(mesh.vertices_world)}; path-points={len(path)}; artifacts -> {output}")
 
 
 if __name__ == "__main__":

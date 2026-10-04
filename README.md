@@ -60,7 +60,19 @@ This standalone repository reimplements the core geometry from **“Silhouettes 
 
 The original institute code, Unity/ARCore application, model, and experimental assets are unavailable. This independent implementation turns segmentation masks into contoured and triangulated view-dependent proxies, projects them relative to a floor plane, and uses them for occlusion, contact targets, and collision-aware routing. It does not reproduce the paper's DollDataset, trained network, mobile timings, virtual human, or pilot-study results.
 
-### Setup
+### Immediate browser demo
+
+```powershell
+py -3.11 -m venv .venv
+.venv\Scripts\Activate.ps1
+pip install -e .
+python scripts/prepare_viewer.py
+python -m silhouette_ar.demo
+```
+
+Open `http://127.0.0.1:8763` and choose the labeled procedural mask example. The real mask and optional segmentation paths are documented below.
+
+### Detailed setup and checks
 
 ```powershell
 py -3.11 -m venv .venv
@@ -72,9 +84,9 @@ pytest -q
 
 Install `.[yolo,dev]` instead to infer masks with Ultralytics segmentation weights.
 
-### Synthetic quickstart
+### Procedural verification
 
-Run `python scripts/smoke.py` after installation. It creates a binary object mask in memory and passes it through the production connected-component, contour, triangulation, calibrated projection, occlusion, obstacle-grid, and path-planning code. Inspect the mask, composite, mesh, targets, and path under `outputs/smoke/`. For real inputs, supply a reviewed binary mask to the CLI or replace it with `YoloSegmenter.segment(frame)` output; camera intrinsics and world/floor calibration remain the same geometry contract.
+Run `python scripts/verify.py` after installation. It creates a binary object mask in memory and passes it through the production connected-component, contour, triangulation, calibrated projection, occlusion, obstacle-grid, and path-planning code. Inspect the mask, composite, mesh, targets, and path under `outputs/verify/`. For real inputs, supply a reviewed binary mask to the CLI or replace it with `YoloSegmenter.segment(frame)` output; camera intrinsics and world/floor calibration remain the same geometry contract.
 
 ### Use a mask
 
@@ -111,4 +123,12 @@ Using `model=yolo11n-seg.pt` fine-tunes public pretrained weights instead. Follo
 
 For each connected mask instance, the pipeline traces and simplifies its outer contour, ear-clips the polygon, intersects the contour's bottom-midpoint ray with the floor, and places every contour ray at that reference distance. The result matches the visible outline from the current camera and tilts with the view. It is deliberately a 2.5D proxy: it has no hidden surfaces and must be updated when the view, object, or mask changes.
 
-`occlusion_composite` hides virtual pixels behind the per-pixel real-object mask and can compare virtual/object depth maps per pixel. Each mesh exposes its world-XZ floor projection; `rasterize_world_footprints` turns those polygons into walkable-floor holes and `astar_path` routes around them. `interaction_targets` exposes reproducible points for pointing, approaching, touching/pushing/petting, and riding. A renderer or animation system remains responsible for IK, depth ordering, temporal tracking, and safe physical behavior.
+`occlusion_composite` hides virtual pixels behind the per-pixel real-object mask and can compare virtual/object depth maps per pixel. Each mesh exposes a visible-width floor strip; `rasterize_world_footprints` turns those polygons into walkable-floor holes and `astar_path` routes around them. `interaction_targets` exposes reproducible points for pointing, approaching, touching/pushing/petting, and riding. A renderer or animation system remains responsible for IK, depth ordering, temporal tracking, and safe physical behavior.
+
+### Dataset and local browser viewer
+
+The [KISTMRLab DollDataset](https://github.com/KISTMRLab/DollDataset) lists doll image folders and a CC BY 4.0 license. Its repository listing does not establish aligned segmentation masks. Download it yourself outside this repository, then run `python -m silhouette_ar.dataset <downloaded-directory>` to inventory images and annotation-like candidates. Inspect any candidates before treating them as masks. If masks are absent, draw/review binary foreground masks for selected frames, or run a separately obtained segmentation checkpoint (`--weights` in the Python CLI). Do not treat a thresholded photograph as ground-truth segmentation. Nothing from that dataset is bundled here.
+
+Run `python scripts/prepare_viewer.py` to fetch a pinned Three.js module into ignored `static/vendor/`, then `python -m silhouette_ar.demo` and open `http://127.0.0.1:8763`. Select a reviewed binary mask or the labeled procedural example. The backend extracts connected components, contours, triangles, calibrated floor-ray vertices, contact targets, and a path around a visible-width floor strip. The 3D viewer displays those outputs and a procedural animated guide. For actual image segmentation, start `python -m silhouette_ar.demo --weights <segmentation-checkpoint>` and use `/api/segment` through a host integration; the browser's ordinary upload is intentionally a mask input. Calibration shown in the viewer is a declared example until device intrinsics and pose are supplied.
+
+The [automatic-text-to-gesture research implementation](https://github.com/ghazanPK/automatic-text-to-gesture) is a possible gesture animation integration for virtual-human behavior; it is not required by this geometry repository. Run `python scripts/verify.py` and `pytest -q` for geometry, occlusion, targets, and navigation checks.

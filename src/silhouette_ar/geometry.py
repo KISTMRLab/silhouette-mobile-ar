@@ -31,8 +31,12 @@ class SilhouetteMesh:
 
     @property
     def floor_footprint_world(self) -> np.ndarray:
-        """Vertical projection of the ordered silhouette boundary onto world XZ."""
-        return self.vertices_world[:, (0, 2)]
+        """Visible-width floor strip; depth is an explicit planar-proxy assumption."""
+        x = self.vertices_world[:, 0]
+        z = float(self.floor_contact_world[2])
+        half_depth = max(.08, float(x.max() - x.min()) * .15)
+        return np.array([[x.min(), z-half_depth], [x.max(), z-half_depth],
+                         [x.max(), z+half_depth], [x.min(), z+half_depth]])
 
     def interaction_targets(self) -> dict[str, list[float]]:
         top = self.vertices_world[int(np.argmin(self.contour_px[:, 1]))]

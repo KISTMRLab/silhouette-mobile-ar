@@ -10,3 +10,4 @@ silhouettes.json
 *.egg-info/
 build/
 dist/
+static/vendor/
