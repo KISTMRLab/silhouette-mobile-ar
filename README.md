@@ -8,9 +8,9 @@
 
 > Real-object silhouettes give virtual humans spatial context in mobile AR.
 
-![Method diagram from Figure 4 of the silhouette-mobile-ar paper](paper-assets/method.png)
+![Graphical abstract: real-object segmentation and dynamic silhouette proxies enable virtual-human occlusion, walking and contact in mobile AR](paper-assets/graphical-abstract.png)
 
-*Original method figure from the paper: Figure 4, PDF page 6. Extracted for this research introduction; the diagram describes the original system, not verification of this reimplementation.*
+*Graphical abstract diagram. Dynamic silhouette proxies support shape-aware occlusion, collision-aware walking and contact with real objects.*
 
 ## Why this research
 

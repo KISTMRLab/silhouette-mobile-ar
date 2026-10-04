@@ -1,9 +1,11 @@
 {
-  "file": "method.png",
-  "kind": "original-paper-figure",
+  "file": "graphical-abstract.png",
+  "kind": "ai-generated-scientific-redraw",
   "source_pdf": "silhouette-mobile-ar.pdf",
   "page": 6,
   "figure": 4,
-  "alt": "Method diagram from Figure 4 of the silhouette-mobile-ar paper",
-  "caption": "Original method figure from the paper: Figure 4, PDF page 6. Extracted for this research introduction; the diagram describes the original system, not verification of this reimplementation."
+  "alt": "Graphical abstract: real-object segmentation and dynamic silhouette proxies enable virtual-human occlusion, walking and contact in mobile AR",
+  "caption": "Graphical abstract diagram. Dynamic silhouette proxies support shape-aware occlusion, collision-aware walking and contact with real objects.",
+  "original_figure": "method.png",
+  "generation_prompt": "generation-prompt.txt"
 }
