@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "silhouette-mobile-ar"
+version = "0.1.0"
+description = "Silhouette geometry, occlusion, contact, and path-planning research reimplementation"
+requires-python = ">=3.10"
+dependencies = ["numpy>=1.26,<3", "opencv-python>=4.9,<5"]
+
+[project.optional-dependencies]
+yolo = ["ultralytics>=8.3,<9"]
+dev = ["pytest>=8,<9"]
+
+[project.scripts]
+silhouette-ar = "silhouette_ar.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+

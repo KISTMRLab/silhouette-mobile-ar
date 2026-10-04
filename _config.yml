@@ -1,0 +1,17 @@
+title: "Silhouette AR"
+description: "Real-object silhouettes give virtual humans spatial context in mobile AR."
+markdown: kramdown
+kramdown:
+  input: GFM
+exclude:
+  - src
+  - tests
+  - .venv
+  - data
+  - runs
+  - outputs
+  - checkpoints
+  - pyproject.toml
+  - requirements.txt
+  - package.json
+  - package-lock.json

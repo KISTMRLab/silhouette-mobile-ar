@@ -1,0 +1,9 @@
+{
+  "file": "method.png",
+  "kind": "original-paper-figure",
+  "source_pdf": "silhouette-mobile-ar.pdf",
+  "page": 6,
+  "figure": 4,
+  "alt": "Method diagram from Figure 4 of the silhouette-mobile-ar paper",
+  "caption": "Original method figure from the paper: Figure 4, PDF page 6. Extracted for this research introduction; the diagram describes the original system, not verification of this reimplementation."
+}
