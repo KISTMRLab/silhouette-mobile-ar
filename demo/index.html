@@ -1,19 +1,56 @@
-<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Silhouette proxy lab</title><style>body{margin:0;background:#0e1a22;color:#e5f3ef;font:16px system-ui}main{max-width:1200px;margin:auto;padding:24px}.grid{display:grid;grid-template-columns:1fr 1fr;gap:22px}@media(max-width:800px){.grid{grid-template-columns:1fr}}canvas{width:100%;background:#213540;border-radius:12px}button,input{font:inherit;padding:9px}button{background:#5cd2b7;border:0;border-radius:8px;cursor:pointer}#scene{height:440px;background:#172a32;border-radius:12px}pre{white-space:pre-wrap;max-height:200px;overflow:auto}#occlusion{width:100%;max-height:180px;object-fit:contain;background:#20333c}</style><main><h1>Real-object silhouette proxy</h1><p>Supply a binary mask or use the authored sample. The same contour, triangulation, floor-ray calibration, target, and path code powers the 3D view.</p><div class="grid"><section><canvas id="mask" width="480" height="360"></canvas><p><button id="sample">Procedural mask</button> <label>Mask or photo <input id="file" type="file" accept="image/*"></label></p><label>Focal length px <input id="fx" type="number" value="480" min="1"></label> <label>Camera height m <input id="height" type="number" value="1.4" min="0.1" step="0.1"></label><button id="build">Build from binary mask</button> <button id="segment">Segment photo with YOLO</button><p id="source">No input yet</p><h3>Mask-aware occlusion</h3><img id="occlusion" alt="Virtual red strip hidden behind the mask"><pre id="details"></pre></section><section><div id="scene"></div><p>Rotate the 3D scene by dragging. Proxy thickness and path clearance are declared approximations; vertices follow the calibrated planar projection.</p></section></div></main><script type="module">
-import * as THREE from '/static/vendor/three.module.js';
-import {createStage} from '/static/avatar.js?v=20261005-beat2';
-const canvas=document.querySelector('#mask'),ctx=canvas.getContext('2d'),sceneBox=document.querySelector('#scene'),details=document.querySelector('#details'),source=document.querySelector('#source');let image=null,renderer,scene,camera,group,angle=.4,drag=null;
-function sample(){ctx.fillStyle='#000';ctx.fillRect(0,0,480,360);ctx.fillStyle='#fff';ctx.beginPath();ctx.moveTo(230,85);ctx.bezierCurveTo(350,55,390,260,305,300);ctx.lineTo(160,300);ctx.bezierCurveTo(105,230,140,105,230,85);ctx.fill();image=canvas.toDataURL('image/png');source.textContent='Procedural authored binary mask; no segmenter prediction'}
-document.querySelector('#sample').onclick=sample;document.querySelector('#file').onchange=e=>{let f=e.target.files[0];if(!f)return;let reader=new FileReader();reader.onload=()=>{let img=new Image();img.onload=()=>{canvas.width=img.width;canvas.height=img.height;ctx.drawImage(img,0,0);image=canvas.toDataURL('image/png');source.textContent='User-supplied mask: '+f.name};img.src=reader.result};reader.readAsDataURL(f)};
-const stage=createStage(sceneBox);scene=stage.scene;camera=stage.camera;renderer=stage.renderer;group=new THREE.Group();scene.add(group);let pathToken=0;camera.position.set(3,2.8,6);camera.lookAt(0,1,0);sceneBox.onpointerdown=e=>drag=e.clientX;window.onpointerup=()=>drag=null;sceneBox.onpointermove=e=>{if(drag!==null){angle+=(e.clientX-drag)*.005;drag=e.clientX;camera.position.set(6*Math.sin(angle),2.8,6*Math.cos(angle));camera.lookAt(0,1,0)}};
-function sphere(point,color,r=.07){let s=new THREE.Mesh(new THREE.SphereGeometry(r,16,12),new THREE.MeshStandardMaterial({color}));s.position.set(...point);group.add(s)}
-function show(data){
- document.querySelector('#occlusion').src=data.occlusion_preview||'';pathToken++;stage.avatar.move=null;
- while(group.children.length){const old=group.children[0];group.remove(old);old.traverse(node=>{node.geometry?.dispose();if(node.material)(Array.isArray(node.material)?node.material:[node.material]).forEach(m=>m.dispose())})}
- data.meshes.forEach(m=>{let geometry=new THREE.BufferGeometry();geometry.setAttribute('position',new THREE.BufferAttribute(new Float32Array(m.vertices_world.flat()),3));geometry.setIndex(m.triangles.flat());geometry.computeVertexNormals();group.add(new THREE.Mesh(geometry,new THREE.MeshStandardMaterial({color:0x66d4ba,transparent:true,opacity:.74,side:THREE.DoubleSide})));group.add(new THREE.LineLoop(new THREE.BufferGeometry().setFromPoints(m.vertices_world.map(v=>new THREE.Vector3(...v))),new THREE.LineBasicMaterial({color:0xffffff})));sphere(m.interaction_targets.touch,0xffb75d);sphere(m.floor_contact_world,0xff5d73)});
- if(data.path.length)group.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(data.path.map(v=>new THREE.Vector3(...v))),new THREE.LineBasicMaterial({color:0xffe06e})));
- const points=[...data.meshes.flatMap(m=>m.vertices_world),...data.path];if(points.length){const xs=points.map(p=>p[0]),ys=points.map(p=>p[1]),zs=points.map(p=>p[2]),minX=Math.min(...xs),maxX=Math.max(...xs),minY=Math.min(0,...ys),maxY=Math.max(...ys),minZ=Math.min(...zs),maxZ=Math.max(...zs),cx=(minX+maxX)/2,cz=(minZ+maxZ)/2;const scale=Math.min(1,3.1/Math.max(.1,maxX-minX),2.5/Math.max(.1,maxZ-minZ),2.3/Math.max(.1,maxY-minY));group.scale.setScalar(scale);group.position.set(-cx*scale,-minY*scale,-cz*scale);
-  const display=p=>[(p[0]-cx)*scale,(p[2]-cz)*scale];if(data.path.length){let route=data.path.filter((p,i,a)=>i===0||i===a.length-1||i>0&&i<a.length-1&&Math.abs((a[i+1][0]-p[0])*(p[2]-a[i-1][2])-(a[i+1][2]-p[2])*(p[0]-a[i-1][0]))>1e-7);let start=display(route[0]);stage.avatar.root.position.set(start[0],0,start[1]);const token=pathToken;let cursor=1;function advance(){if(token!==pathToken||cursor>=route.length){const target=data.meshes[0]?.interaction_targets.touch;if(target)stage.pointAt([(target[0]-cx)*scale,(target[1]-minY)*scale,(target[2]-cz)*scale]);return}const [x,z]=display(route[cursor++]);const distance=Math.hypot(x-stage.avatar.root.position.x,z-stage.avatar.root.position.z);const duration=Math.max(.18,distance/.45);stage.gesture('walk');stage.moveTo(x,z,duration);setTimeout(advance,duration*1000+20)}advance()}else{stage.avatar.root.position.set((minX-cx)*scale-.55,0,0);const target=data.meshes[0]?.interaction_targets.touch;if(target)stage.pointAt([(target[0]-cx)*scale,(target[1]-minY)*scale,(target[2]-cz)*scale]);}}
- details.textContent=JSON.stringify({provenance:data.provenance,meshes:data.meshes.length,triangles:data.meshes.map(m=>m.triangles.length),targets:data.meshes.map(m=>m.interaction_targets),path_points:data.path.length,calibration:data.calibration},null,2)
-}
-async function build(route){if(!image){source.textContent='Choose an image first';return}try{let r=await fetch('/api/'+route,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({image,calibration:{fx:+document.querySelector('#fx').value,fy:+document.querySelector('#fx').value,camera_height:+document.querySelector('#height').value}})}),v=await r.json();if(!r.ok)throw Error(v.error);source.textContent=v.provenance;show(v)}catch(e){details.textContent=e.message}}document.querySelector('#build').onclick=()=>build('mask');document.querySelector('#segment').onclick=()=>build('segment');sample();
-</script></html>
+<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Silhouette AR lab</title>
+<style>
+:root{--bg:#0e1a22;--panel:#16262f;--ink:#e5f3ef;--muted:#9fb7b2;--accent:#5cd2b7;--warn:#ffcf6e}
+*{box-sizing:border-box}[hidden]{display:none!important}body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.45 system-ui,sans-serif}
+main{max-width:1280px;margin:auto;padding:18px 16px}h1{font-size:1.45rem;margin:.2rem 0}p{margin:.4rem 0}
+.grid{display:grid;grid-template-columns:minmax(0,1.7fr) minmax(280px,1fr);gap:18px}@media(max-width:900px){.grid{grid-template-columns:1fr}}
+#view{position:relative;width:100%;aspect-ratio:4/3;background:#000;border-radius:12px;overflow:hidden;cursor:crosshair;touch-action:none}
+#view.calibrating{outline:3px solid var(--warn)}#crosshair{position:absolute;left:50%;top:50%;width:18px;height:18px;margin:-9px;border:2px solid #fff8;border-radius:50%;pointer-events:none}
+.panel{background:var(--panel);border-radius:12px;padding:12px 14px;margin-bottom:12px}.panel h2{font-size:1rem;margin:.1rem 0 .5rem}
+.row{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:.35rem 0}label{color:var(--muted)}
+button,input,select{font:inherit;padding:7px 10px;border-radius:8px;border:1px solid #2f4a55;background:#0f2029;color:var(--ink)}
+button{background:var(--accent);color:#06221b;border:0;cursor:pointer;font-weight:600}button.secondary{background:#29414c;color:var(--ink)}button[aria-pressed=true]{background:var(--warn)}
+input[type=number]{width:5.4em}#keyword{flex:1;min-width:10em}#status{color:var(--warn);min-height:1.4em}
+pre{white-space:pre-wrap;max-height:240px;overflow:auto;font-size:12px;background:#0b151b;padding:8px;border-radius:8px}
+.note{color:var(--muted);font-size:13px}
+</style>
+<main>
+<h1>Real-object silhouettes for a virtual human</h1>
+<p class="note">Camera frames are segmented, each object becomes an equal-distance silhouette mesh on the calibrated floor, and the meshes are drawn depth-only so they hide the avatar wherever the real object is nearer. Meshes keep their ids across updates, so a moving object can be followed. Tap an object or use the centre ray (gaze), or say/type its class.</p>
+<div class="grid">
+<section>
+ <div id="view"><div id="crosshair"></div></div>
+ <div class="row" role="group" aria-label="Interactions">
+  <button id="point">Point</button><button id="approach">Approach</button><button id="follow" aria-pressed="false">Follow</button>
+  <button id="pet">Pet</button><button id="push">Push</button><button id="ride">Ride</button><button id="stop" class="secondary">Stop</button>
+ </div>
+ <div class="row" role="group" aria-label="Selection">
+  <button id="select-centre" class="secondary">Select at centre (gaze)</button>
+  <input id="keyword" placeholder="e.g. follow the rabbit" aria-label="Keyword or command"><button id="select-keyword" class="secondary">Select</button><button id="mic" class="secondary" title="Speech recognition">Speak</button>
+ </div>
+ <p id="status" role="status"></p>
+</section>
+<aside>
+ <div class="panel"><h2>Camera source</h2>
+  <div class="row"><select id="source" aria-label="Source"><option value="sample">Animated sample scene</option><option value="webcam">Webcam</option><option value="file">Image or video file</option></select>
+   <input id="file" type="file" accept="image/*,video/*" hidden></div>
+  <div class="row"><label for="seg">Segmentation</label><select id="seg"><option value="authored">Authored sample mask</option><option value="server">Server model (U-Net / YOLO)</option><option value="onnx">In-browser ONNX U-Net</option><option value="maskfile">Uploaded mask</option></select></div>
+  <div class="row" id="mask-row" hidden><input id="mask-file" type="file" accept="image/png,image/*" aria-label="Binary mask"><input id="mask-label" value="object" aria-label="Mask class" style="width:7em"></div>
+  <div class="row"><button id="build">Update silhouettes</button><label><input id="pause" type="checkbox"> Pause</label><label><input id="outlines" type="checkbox" checked> Show silhouettes</label><label><input id="orbit" type="checkbox"> Inspect 3D</label></div>
+ </div>
+ <div class="panel"><h2>Floor calibration</h2>
+  <div class="row"><label>Camera height m <input id="height" type="number" value="0.55" min="0.05" step="0.05"></label><label>Horizontal FOV ° <input id="hfov" type="number" value="60" min="20" max="140"></label></div>
+  <div class="row"><label>Pitch ° <input id="pitch" type="number" value="24" step="0.5"></label><button id="calibrate" class="secondary">Tap floor to calibrate</button><label>at <input id="tap-distance" type="number" value="1.0" min="0.1" step="0.1"> m</label></div>
+  <div class="row"><label>Avatar height m <input id="avatar-height" type="number" value="0.36" min="0.1" step="0.02"></label><label>Clearance m <input id="clearance" type="number" value="0.05" min="0" step="0.01"></label></div>
+  <p class="note">One tap: mark a floor point at the given horizontal distance from the camera; the pitch follows from the camera height.</p>
+ </div>
+ <div class="panel"><h2>Silhouettes</h2><pre id="details">Loading…</pre></div>
+</aside>
+</div>
+</main>
+<script type="module">
+import * as Avatar from '/static/avatar.js?v=20261005-beat2';
+import {start} from '/demo/app.js';
+start(Avatar);
+</script>
+</html>

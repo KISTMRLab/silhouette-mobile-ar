@@ -1,4 +1,8 @@
-"""Start this repository's bundled example; private data and model weights are optional."""
+"""Start this repository's bundled example; private data and model weights are optional.
+
+Extra arguments go to the demo server, e.g. ``--weights outputs/unet/model.pt`` or
+``--onnx outputs/unet/model.onnx`` (after ``python scripts/prepare_onnx_web.py``).
+"""
 import argparse
 import os
 from pathlib import Path
@@ -8,7 +12,7 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--port', type=int, default=8080)
-args = parser.parse_args()
+args, extra = parser.parse_known_args()
 os.chdir(ROOT)
 os.environ['PYTHONPATH'] = str(ROOT / 'src') + os.pathsep + os.environ.get('PYTHONPATH', '')
 prepare = ROOT / 'scripts' / 'prepare_viewer.py'
@@ -16,4 +20,4 @@ if prepare.exists() and not all((ROOT / 'static' / 'vendor' / name).is_file() fo
     subprocess.run([sys.executable, str(prepare)], check=True)
 
 print(f'Open http://127.0.0.1:{args.port}/ — bundled starter samples are ready.', flush=True)
-raise SystemExit(subprocess.call([sys.executable, *['-m', 'silhouette_ar.demo'], '--port', str(args.port)]))
+raise SystemExit(subprocess.call([sys.executable, *['-m', 'silhouette_ar.demo'], '--port', str(args.port), *extra]))

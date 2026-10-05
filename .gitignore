@@ -5,7 +5,9 @@ __pycache__/
 runs/
 artifacts/
 outputs/
+data/
 *.pt
+*.onnx
 silhouettes.json
 *.egg-info/
 build/

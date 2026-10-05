@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import heapq
+import math
 
 import numpy as np
+
+SQRT2 = math.sqrt(2.0)
 
 
 def occlusion_composite(
@@ -43,7 +46,7 @@ def rasterize_world_footprints(
     cell_size_m: float,
     clearance_m: float = .08,
 ) -> np.ndarray:
-    """Rasterize mesh floor projections into a navigation obstacle grid."""
+    """Rasterize mesh floor projections into a navigation obstacle grid (row = z, column = x)."""
     import cv2
     min_x, min_z, max_x, max_z = bounds_xz
     width = int(np.ceil((max_x - min_x) / cell_size_m))
@@ -61,30 +64,148 @@ def rasterize_world_footprints(
     return grid.astype(bool)
 
 
+def octile_distance(a: tuple[int, int], b: tuple[int, int]) -> float:
+    """Admissible, consistent heuristic for 8-connected grids with diagonal cost sqrt(2)."""
+    dx, dy = abs(a[0] - b[0]), abs(a[1] - b[1])
+    return (dx + dy) + (SQRT2 - 2.0) * min(dx, dy)
+
+
 def astar_path(obstacles: np.ndarray, start: tuple[int, int], goal: tuple[int, int]) -> list[tuple[int, int]]:
     height, width = obstacles.shape
     for point in (start, goal):
         if not (0 <= point[0] < width and 0 <= point[1] < height) or obstacles[point[1], point[0]]:
             return []
-    queue = [(0.0, start)]
+    queue = [(octile_distance(start, goal), 0.0, start)]
     previous: dict[tuple[int, int], tuple[int, int]] = {}
     cost = {start: 0.0}
+    closed: set[tuple[int, int]] = set()
     while queue:
-        _, current = heapq.heappop(queue)
+        _, current_cost, current = heapq.heappop(queue)
+        if current in closed:
+            continue
         if current == goal:
             path = [current]
             while current in previous:
                 current = previous[current]
                 path.append(current)
             return path[::-1]
+        closed.add(current)
         for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1), (1, 1), (-1, -1), (1, -1), (-1, 1)):
             nxt = current[0] + dx, current[1] + dy
             if not (0 <= nxt[0] < width and 0 <= nxt[1] < height) or obstacles[nxt[1], nxt[0]]:
                 continue
-            new_cost = cost[current] + (1.414 if dx and dy else 1.0)
+            if dx and dy and (obstacles[current[1], nxt[0]] or obstacles[nxt[1], current[0]]):
+                continue  # no corner cutting through an obstacle
+            new_cost = current_cost + (SQRT2 if dx and dy else 1.0)
             if new_cost < cost.get(nxt, float("inf")):
                 cost[nxt] = new_cost
                 previous[nxt] = current
-                heuristic = abs(goal[0] - nxt[0]) + abs(goal[1] - nxt[1])
-                heapq.heappush(queue, (new_cost + heuristic, nxt))
+                heapq.heappush(queue, (new_cost + octile_distance(nxt, goal), new_cost, nxt))
     return []
+
+
+def stand_point(footprint_xz: np.ndarray, toward_xz: np.ndarray, clearance_m: float, step_m: float = .01,
+                max_distance_m: float = 5.0, blocked=None) -> np.ndarray:
+    """Standing position next to an object (paper Section 5.3).
+
+    Starts at the centre of the un-walkable area and moves toward ``toward_xz``
+    (the camera's floor position) until it is ``clearance_m`` outside the
+    footprint, i.e. outside the dilated hole. ``blocked(xz)`` may reject points
+    occupied by other objects; nearby directions are then tried.
+    """
+    import cv2
+    polygon = np.asarray(footprint_xz, np.float32).reshape(-1, 1, 2)
+    center = np.asarray(footprint_xz, float).mean(axis=0)
+    direction = np.asarray(toward_xz, float) - center
+    if np.linalg.norm(direction) < 1e-9:
+        direction = np.array([0.0, -1.0])
+    base = math.atan2(direction[1], direction[0])
+    for offset in (0, 20, -20, 40, -40, 60, -60, 90, -90, 135, -135, 180):
+        angle = base + math.radians(offset)
+        unit = np.array([math.cos(angle), math.sin(angle)])
+        distance = 0.0
+        while distance <= max_distance_m:
+            point = center + distance * unit
+            outside = -cv2.pointPolygonTest(polygon, (float(point[0]), float(point[1])), True)
+            if outside >= clearance_m:
+                if blocked is None or not blocked(point):
+                    return point
+                break
+            distance += step_m
+    return center + clearance_m * direction / max(np.linalg.norm(direction), 1e-9)
+
+
+def nearest_free(grid: np.ndarray, cell: tuple[int, int], max_radius: int = 40) -> tuple[int, int] | None:
+    height, width = grid.shape
+    x, y = min(max(cell[0], 0), width - 1), min(max(cell[1], 0), height - 1)
+    if not grid[y, x]:
+        return x, y
+    for radius in range(1, max_radius + 1):
+        best = None
+        for dy in range(-radius, radius + 1):
+            for dx in (-radius, radius) if abs(dy) != radius else range(-radius, radius + 1):
+                nx, ny = x + dx, y + dy
+                if 0 <= nx < width and 0 <= ny < height and not grid[ny, nx]:
+                    d = dx * dx + dy * dy
+                    if best is None or d < best[0]:
+                        best = (d, (nx, ny))
+        if best:
+            return best[1]
+    return None
+
+
+def line_of_sight(grid: np.ndarray, a: tuple[int, int], b: tuple[int, int]) -> bool:
+    steps = int(max(abs(b[0] - a[0]), abs(b[1] - a[1])) * 2) + 1
+    for t in np.linspace(0.0, 1.0, steps + 1):
+        x = int(round(a[0] + (b[0] - a[0]) * t))
+        y = int(round(a[1] + (b[1] - a[1]) * t))
+        if grid[y, x]:
+            return False
+    return True
+
+
+def smooth_path(grid: np.ndarray, path: list[tuple[int, int]]) -> list[tuple[int, int]]:
+    """Drop waypoints that are visible from an earlier waypoint (string pulling)."""
+    if len(path) <= 2:
+        return list(path)
+    result = [path[0]]
+    anchor = 0
+    while anchor < len(path) - 1:
+        nxt = len(path) - 1
+        while nxt > anchor + 1 and not line_of_sight(grid, path[anchor], path[nxt]):
+            nxt -= 1
+        result.append(path[nxt])
+        anchor = nxt
+    return result
+
+
+def plan_on_floor(footprints_xz: list[np.ndarray], start_xz, goal_xz, cell_size_m: float = .025, clearance_m: float = .06,
+                  margin_m: float = .6, smooth: bool = True) -> dict:
+    """A* over the walkable floor: footprints are holes dilated by ``clearance_m``.
+
+    Start/goal cells inside a hole snap to the nearest free cell. Returns world
+    x/z waypoints plus the grid diagnostics used by the demo and tests.
+    """
+    start_xz, goal_xz = np.asarray(start_xz, float), np.asarray(goal_xz, float)
+    points = [start_xz[None], goal_xz[None]] + [np.asarray(p, float) for p in footprints_xz]
+    stacked = np.vstack(points)
+    min_x, min_z = stacked.min(axis=0) - margin_m
+    max_x, max_z = stacked.max(axis=0) + margin_m
+    bounds = (float(min_x), float(min_z), float(max_x), float(max_z))
+    grid = rasterize_world_footprints(list(footprints_xz), bounds, cell_size_m, clearance_m)
+
+    def to_cell(p):
+        return int(round((p[0] - min_x) / cell_size_m)), int(round((p[1] - min_z) / cell_size_m))
+
+    start_cell = nearest_free(grid, to_cell(start_xz))
+    goal_cell = nearest_free(grid, to_cell(goal_xz))
+    if start_cell is None or goal_cell is None:
+        return {"path_xz": [], "ok": False, "reason": "no free cell near start or goal", "bounds": bounds}
+    cells = astar_path(grid, start_cell, goal_cell)
+    if not cells:
+        return {"path_xz": [], "ok": False, "reason": "goal unreachable", "bounds": bounds}
+    if smooth:
+        cells = smooth_path(grid, cells)
+    path = [[min_x + x * cell_size_m, min_z + y * cell_size_m] for x, y in cells]
+    return {"path_xz": path, "ok": True, "bounds": bounds, "cells": len(cells), "grid_shape": list(grid.shape),
+            "start_snapped": start_cell != to_cell(start_xz), "goal_snapped": goal_cell != to_cell(goal_xz)}
