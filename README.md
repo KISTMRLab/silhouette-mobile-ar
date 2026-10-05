@@ -66,7 +66,7 @@ python -m pip install -e .
 python scripts/start_demo.py
 ```
 
-Open **http://127.0.0.1:8080/**. The authored mask is loaded. Click **Build from binary mask** to inspect its proxy mesh and occlusion. The launcher selects the bundled inputs automatically; it also builds the small authored index for RAG demos. Avatar demos prepare their pinned Three.js modules on first launch, so that step needs internet access. Model weights and public datasets are optional for the starter workflow and are prepared separately for real-data use.
+Open **http://127.0.0.1:8080/**. The animated sample scene and its authored masks load automatically. Click **Update silhouettes** to rebuild the equal-distance silhouette meshes, select an object (tap it, use **Select at centre (gaze)**, or type or say its class), then try **Point**, **Approach**, **Follow**, **Pet**, **Push** or **Ride**; the depth-only silhouettes hide the avatar wherever the real object is nearer. **Camera source** switches to a webcam or file with one-tap floor calibration, and segmentation can use a trained U-Net on the server or an exported ONNX U-Net in the browser (training and export are documented below). The launcher selects the bundled inputs automatically. Avatar demos prepare their pinned Three.js modules on first launch, so that step needs internet access. Model weights and public datasets are optional for the starter workflow and are prepared separately for real-data use.
 
 The 3D presentation uses shared Three.js avatar components and bundled fictional CC0 characters. The paper-specific algorithms and data adapters live in this repository.
 
