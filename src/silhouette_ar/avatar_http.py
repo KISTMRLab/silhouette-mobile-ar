@@ -5,7 +5,8 @@ from urllib.parse import unquote,urlsplit
 def serve_avatar_asset(handler,static):
     path=unquote(urlsplit(handler.path).path)
     companion=path=='/static/recorded-motion.html'
-    if not companion and not path.startswith(('/static/avatars/','/static/vendor/','/static/examples/')):return False
+    module=path in {'/static/avatar.js','/static/speech.js'}
+    if not companion and not module and not path.startswith(('/static/avatars/','/static/vendor/','/static/examples/')):return False
     root=Path(static).resolve();target=(root/path.removeprefix('/static/')).resolve()
     if not target.is_relative_to(root) or (companion and target.name!='recorded-motion.html') or (not companion and target.suffix not in {'.glb','.json','.md','.js','.png'}) or not target.is_file():
         handler.send_error(404);return True
