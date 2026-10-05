@@ -24,3 +24,6 @@ This project implements the paper's silhouette-proxy geometry rather than presen
 - Tests use procedural masks to verify contour/mesh generation, occlusion, contact targets, and collision-aware path failure/success.
 - All checks run without downloading a model or dataset.
 
+## Bundled fictional avatar substitution
+
+Two newly generated fictional CC0 humanoids replace the original avatar assets in the browser demo. They provide a 53-bone rig and named ARKit/viseme targets. Motion retargeting adapts source joints to their bind pose; speaking envelopes approximate mouth motion rather than phoneme alignment. The optional recorded BEAT companion inspects public motion, face and audio files prepared locally, independently of the paper's learned algorithm. No dataset recordings or trained weights are bundled.

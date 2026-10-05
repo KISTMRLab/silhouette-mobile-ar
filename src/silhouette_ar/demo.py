@@ -6,6 +6,7 @@ import base64
 import json
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from .avatar_http import serve_avatar_asset
 
 import cv2
 import numpy as np
@@ -52,6 +53,7 @@ def analyze(mask: np.ndarray, calibration: dict) -> dict:
 def app(segmenter=None):
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):
+            if serve_avatar_asset(self, Path(__file__).resolve().parents[2] / "static"): return
             if self.path in {"/static/avatar.js", "/static/speech.js", "/static/vendor/three.module.js"}:
                 body = (ROOT / self.path.lstrip("/")).read_bytes()
                 self.send_response(200)
