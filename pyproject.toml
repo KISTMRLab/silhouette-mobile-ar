@@ -7,6 +7,7 @@ name = "silhouette-mobile-ar"
 version = "0.2.0"
 description = "Silhouette segmentation, geometry, occlusion, contact, and path-planning research reimplementation"
 requires-python = ">=3.10"
+license = {text = "MIT"}
 dependencies = ["numpy>=1.26,<3", "opencv-python>=4.9,<5"]
 
 [project.optional-dependencies]
