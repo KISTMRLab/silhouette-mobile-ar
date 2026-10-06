@@ -135,6 +135,65 @@ def stand_point(footprint_xz: np.ndarray, toward_xz: np.ndarray, clearance_m: fl
     return center + clearance_m * direction / max(np.linalg.norm(direction), 1e-9)
 
 
+def footprint_clearance(footprint_xz: np.ndarray, point_xz) -> float:
+    """Signed floor distance from ``point_xz`` to a footprint polygon (positive outside)."""
+    import cv2
+    polygon = np.asarray(footprint_xz, np.float32).reshape(-1, 1, 2)
+    return float(-cv2.pointPolygonTest(polygon, (float(point_xz[0]), float(point_xz[1])), True))
+
+
+def ride_seat(footprint_xz: np.ndarray, body_top, inset_m: float = .03) -> np.ndarray:
+    """Seat for riding: the silhouette's body top, kept ``inset_m`` inside the footprint.
+
+    The equal-distance mesh leans away from a downward-pitched camera, so its body
+    top projects near the far edge of the floor footprint. The seat keeps the top
+    height but slides along the floor toward the footprint centre until it is
+    ``inset_m`` inside (or reaches the centre), so the rider sits over the object
+    even while the next silhouette update lags a moving object by a few cm.
+    """
+    footprint = np.asarray(footprint_xz, float)
+    seat = np.asarray(body_top, float).copy()
+    center = footprint.mean(axis=0)
+    start = seat[[0, 2]].copy()
+    if -footprint_clearance(footprint, start) >= inset_m:
+        return seat
+    best = center
+    for k in np.linspace(0.0, 1.0, 41)[1:]:
+        point = start + k * (center - start)
+        if -footprint_clearance(footprint, point) >= inset_m:
+            best = point
+            break
+    seat[0], seat[2] = best
+    return seat
+
+
+def follow_point(footprint_xz: np.ndarray, camera_xz, from_xz, standoff_m: float, toward_camera_deg: float = 30.0,
+                 blocked=None) -> np.ndarray:
+    """Stand-off position for following an object.
+
+    The avatar stays beside the object as seen from the camera, on the side it
+    already occupies, turned ``toward_camera_deg`` toward the camera so it is a
+    little nearer than the object. The point is ``standoff_m`` outside the
+    footprint; ``standoff_m`` should cover the navigation clearance plus the
+    avatar's body radius, so neither the root nor the body enters the object's
+    dilated hole. Standing straight toward the camera (``stand_point``) would put
+    the avatar in front of the object in the image and hide it.
+    """
+    footprint = np.asarray(footprint_xz, float)
+    center = footprint.mean(axis=0)
+    view = center - np.asarray(camera_xz, float)
+    if np.linalg.norm(view) < 1e-9:
+        view = np.array([0.0, 1.0])
+    view /= np.linalg.norm(view)
+    lateral = np.array([view[1], -view[0]])
+    offset = np.asarray(from_xz, float) - center if from_xz is not None else lateral
+    if float(np.dot(offset, lateral)) < 0:
+        lateral = -lateral
+    angle = math.radians(toward_camera_deg)
+    direction = math.cos(angle) * lateral - math.sin(angle) * view
+    return stand_point(footprint, center + direction, standoff_m, blocked=blocked)
+
+
 def nearest_free(grid: np.ndarray, cell: tuple[int, int], max_radius: int = 40) -> tuple[int, int] | None:
     height, width = grid.shape
     x, y = min(max(cell[0], 0), width - 1), min(max(cell[1], 0), height - 1)

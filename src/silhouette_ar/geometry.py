@@ -162,10 +162,11 @@ class SilhouetteMesh:
         """Targets for point, approach/stand, touch, pet, push and ride (paper Section 5).
 
         ``touch`` is the highest silhouette vertex; ``pet`` and ``ride`` use the
-        body top (see ``body_top``); ``stand`` is the standing position outside the
-        dilated hole, toward the camera (Section 5.3).
+        body top (see ``body_top``), the ride seat kept inside the floor footprint
+        (``ride_seat``); ``stand`` is the standing position outside the dilated
+        hole, toward the camera (Section 5.3).
         """
-        from .interaction import stand_point
+        from .interaction import ride_seat, stand_point
 
         normal, offset = _unit_plane(self.floor_normal, self.floor_offset)
         heights = self.heights()
@@ -180,7 +181,7 @@ class SilhouetteMesh:
         stand = np.array([stand_xz[0], 0.0, stand_xz[1]])
         stand[1] = -(normal[0] * stand[0] + normal[2] * stand[2] + offset) / normal[1] if abs(normal[1]) > 1e-6 else 0.0
         return {"point": center.tolist(), "approach": stand.tolist(), "stand": stand.tolist(), "touch": top.tolist(),
-                "pet": body.tolist(), "push": push.tolist(), "ride": body.tolist(), "top_height": height,
+                "pet": body.tolist(), "push": push.tolist(), "ride": ride_seat(footprint[:, [0, 2]], body).tolist(), "top_height": height,
                 "footprint_center": footprint.mean(axis=0).tolist()}
 
 

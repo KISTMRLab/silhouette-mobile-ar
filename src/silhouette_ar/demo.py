@@ -19,13 +19,14 @@ import numpy as np
 
 from .cli import serialize
 from .geometry import CameraIntrinsics, build_meshes, camera_pose
-from .interaction import plan_on_floor
+from .interaction import follow_point, footprint_clearance, plan_on_floor
 from .segmentation import class_instances, connected_instances, load_segmenter
 from .selection import select_by_keyword, select_by_pixel
 from .tracking import SilhouetteTracker
 
 ROOT = Path(__file__).resolve().parents[2]
 ORT_DIR = ROOT / "static" / "vendor" / "onnxruntime"
+FOLLOW_MARGIN_M = .03  # slack for the object moving between silhouette updates
 SESSIONS: dict[str, dict] = {}
 LOCK = threading.Lock()
 
@@ -153,9 +154,23 @@ def handle_plan(payload: dict) -> dict:
     stand = targets["stand"]
     start = payload.get("from") or [stand[0], stand[2]]
     obstacles = [track.mesh.floor_footprint_world for track in tracker.tracks.values()]
-    plan = plan_on_floor(obstacles, start, [stand[0], stand[2]], clearance_m=calibration["clearance"])
+    clearance = calibration["clearance"]
+    interaction = payload.get("interaction", "approach")
+    if interaction == "follow":
+        # Following keeps the avatar's whole body outside every dilated footprint:
+        # the grid is dilated by the body radius too, and the goal stands beside
+        # the object (not in front of it), re-planned on every silhouette update.
+        body = max(0.0, float(payload.get("body_radius", 0.0)))
+        clearance += body
+        others = [track.mesh.floor_footprint_world for track in tracker.tracks.values() if track.mesh is not target]
+        goal = follow_point(target.floor_footprint_world, calibration["origin"][[0, 2]], start, clearance + FOLLOW_MARGIN_M,
+                            blocked=lambda p: any(footprint_clearance(f, p) < clearance for f in others))
+        stand = [float(goal[0]), 0.0, float(goal[1])]
+        targets["follow"] = stand
+        targets["follow_standoff"] = clearance + FOLLOW_MARGIN_M
+    plan = plan_on_floor(obstacles, start, [stand[0], stand[2]], clearance_m=clearance)
     return {"ok": plan["ok"], "reason": plan.get("reason"), "path": [[x, 0.0, z] for x, z in plan["path_xz"]], "target_id": target.instance_id,
-            "label": target.label, "targets": targets, "interaction": payload.get("interaction", "approach")}
+            "label": target.label, "targets": targets, "interaction": interaction, "clearance": clearance}
 
 
 def handle_select(payload: dict) -> dict:

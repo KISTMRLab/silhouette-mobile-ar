@@ -23,7 +23,7 @@ This project implements the paper's segmentation-to-silhouette pipeline and its 
 10. **Interactions:**
     - walkable floor with dilated holes, 8-connected A* with an octile heuristic and path smoothing;
     - a standing point slightly toward the camera from the centre of the un-walkable area, outside the dilated hole, used by approach, pet and push;
-    - point, approach, follow (re-planned every update), pet, push and ride (seated on the silhouette's body top).
+    - point, approach, follow (re-planned every update to a point beside the object, outside its footprint by the clearance plus the avatar's body radius), pet, push and ride (seated on the tracked silhouette's body top, inside its footprint, and kept there while the object moves).
 11. **Occlusion.** The silhouette meshes are rendered depth-only over the camera image so that they hide the avatar. A 2D mask or depth compositor remains for offline outputs.
 12. **Web demo.** Desktop webcam or uploaded image/video with one-tap floor calibration, server-side (U-Net/YOLO) or in-browser ONNX segmentation, and a sample scene with an authored mask that needs no model.
 

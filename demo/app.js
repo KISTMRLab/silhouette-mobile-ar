@@ -25,7 +25,8 @@ export function start(Avatar) {
   scene.background = texture;
   const meshGroup = new THREE.Group(), pathLine = new THREE.Group(); scene.add(meshGroup, pathLine);
   let W = 640, H = 480, source = 'sample', video = null, still = null, maskImage = null;
-  let current = null, selected = null, following = null, walkToken = 0, timers = [], inflight = false, lastUpdate = 0, riding = false;
+  let current = null, selected = null, following = null, walkToken = 0, timers = [], inflight = false, lastUpdate = 0, riding = null;
+  const motion = new Map();  // instance id -> {seat, time, velocity}: ride points per silhouette update
   let calibrating = false, pendingReset = true, ort = null, ortSession = null, ortMeta = null, serverStatus = {};
 
   const say = text => { statusLine.textContent = text; };
@@ -216,8 +217,8 @@ export function start(Avatar) {
     inflight = true; lastUpdate = performance.now();
     try {
       drawFrame(t); const body = await payload(t);
-      if (pendingReset) { body.reset = true; pendingReset = false; }
-      applyFrame(await post('/api/frame', body));
+      if (pendingReset) { body.reset = true; pendingReset = false; motion.clear(); }
+      applyFrame(await post('/api/frame', body), t);
     }
     catch (e) { say(e.message); details.textContent = 'Error: ' + e.message; }
     finally { inflight = false; }
@@ -250,8 +251,18 @@ export function start(Avatar) {
     if (path?.length > 1) { const l = new THREE.Line(new THREE.BufferGeometry().setFromPoints(path.map(p => new THREE.Vector3(p[0], .004, -p[2]))), new THREE.LineBasicMaterial({color: 0xffe06e, depthTest: false})); l.renderOrder = 7; pathLine.add(l); }
   }
   let placed = false;
-  function applyFrame(data) {
-    current = data;
+  function trackMotion(data, t) {
+    // Ride points per tracked id, with a velocity estimate between silhouette
+    // updates, so a rider stays on a moving object between (and across) updates.
+    for (const m of data.meshes) {
+      const seat = m.interaction_targets.ride, prev = motion.get(m.instance_id);
+      let velocity = [0, 0, 0];
+      if (prev && t - prev.time > .05 && t - prev.time < 3) velocity = seat.map((v, i) => .5 * prev.velocity[i] + .5 * (v - prev.seat[i]) / (t - prev.time));
+      motion.set(m.instance_id, {seat, time: t, velocity});
+    }
+  }
+  function applyFrame(data, t = performance.now() / 1000) {
+    current = data; trackMotion(data, t);
     if (!placed && data.spawn) { actor.root.position.set(data.spawn[0], 0, -data.spawn[2]); placed = true; face([0, 0, 2]); }
     if (selected && !data.meshes.some(m => m.instance_id === selected)) say(`${selected} is not visible in this frame; keeping its last position.`);
     buildMeshes(); applyCamera();
@@ -260,7 +271,7 @@ export function start(Avatar) {
       labels: data.meshes.map(m => m.label), triangles: data.meshes.map(m => m.triangles.length), path_points: data.path.length,
       timing_ms: data.timing_ms, calibration: data.calibration, targets: data.meshes.find(m => m.instance_id === selected)?.interaction_targets}, null, 2);
   }
-  function resetScene() { stopAll(); selected = null; placed = false; current = null; pendingReset = true; disposeGroup(meshGroup); disposeGroup(pathLine); }
+  function resetScene() { stopAll(); selected = null; placed = false; current = null; pendingReset = true; motion.clear(); disposeGroup(meshGroup); disposeGroup(pathLine); }
 
   // ------------------------------------------------------------ selection
   async function select(body, label) {
@@ -305,8 +316,13 @@ export function start(Avatar) {
   // ------------------------------------------------------------ avatar behaviour
   function face(p) { if (typeof stage.setFacing === 'function') stage.setFacing([p[0], 0, -p[2]]); else actor.root.rotation.y = Math.atan2(p[0] - actor.root.position.x, -p[2] - actor.root.position.z); }
   function release() { if (typeof stage.reachTo === 'function') stage.reachTo(null); }
-  function standUp() { if (riding && typeof stage.stand === 'function') stage.stand(); riding = false; }
-  function stopAll() { walkToken++; timers.forEach(clearTimeout); timers = []; following = null; $('#follow').setAttribute('aria-pressed', 'false'); release(); standUp(); stage.gesture('idle'); }
+  function standUp() { if (riding && typeof stage.stand === 'function') stage.stand(); riding = null; }
+  function dismount() {
+    // Step off toward the camera-side stand point instead of standing up inside the object.
+    const m = riding && meshById(riding.id); standUp();
+    if (m) { const s = m.interaction_targets.stand; stage.moveTo(s[0], -s[2], .35); }
+  }
+  function stopAll() { walkToken++; timers.forEach(clearTimeout); timers = []; following = null; followGoal = null; $('#follow').setAttribute('aria-pressed', 'false'); release(); dismount(); stage.gesture('idle'); }
   function walk(path, done) {
     const token = ++walkToken; standUp(); drawPath(path);
     const points = path.slice(1), speed = Math.max(.12, num('#avatar-height', .36) * .75);
@@ -325,11 +341,56 @@ export function start(Avatar) {
     walk(r.path.length ? r.path : [[...avatarXZ()].flatMap((v, i) => i ? [0, v] : [v])], () => { face(r.targets.point); if (stage.lookAt) stage.lookAt(w2t(r.targets.point)); done?.(r.targets); });
     return r;
   }
-  let planning = false;
+  // Follow: re-planned on every silhouette update toward a stand-off point beside
+  // the object. The planner dilates every footprint by the clearance plus the
+  // avatar's body radius, so neither the path nor the stance enters the mesh.
+  let planning = false, followGoal = null;
+  const bodyRadius = () => .22 * num('#avatar-height', .36);
   async function replanFollow() {
-    if (planning) return; planning = true;
-    try { const r = await goTo(following, 'follow'); if (r) say(`Following ${following}: ${r.path.length} waypoint(s) to its stand point.`); }
+    if (planning || !following) return; planning = true;
+    const id = following;
+    try {
+      const r = await post('/api/plan', {session: SESSION, target_id: id, from: avatarXZ(), interaction: 'follow', body_radius: bodyRadius()});
+      if (following !== id) return;
+      if (!r.ok) { say(`Follow: ${r.reason}`); return; }
+      const goal = r.targets.follow;
+      if (followGoal && Math.hypot(goal[0] - followGoal[0], goal[2] - followGoal[2]) < .02) return;  // keep walking/standing; no restart jitter
+      followGoal = goal; const here = avatarXZ();
+      walk(r.path.length ? r.path : [[here[0], 0, here[1]]], () => { face(r.targets.point); if (stage.lookAt) stage.lookAt(w2t(r.targets.point)); });
+      say(`Following ${id}: ${r.path.length} waypoint(s) to a point ${r.targets.follow_standoff.toFixed(2)} m beside it.`);
+    }
     catch (e) { say(e.message); } finally { planning = false; }
+  }
+  // Ride: the seat is the tracked silhouette's body top, re-read from every
+  // silhouette update (extrapolated between updates) and applied every frame.
+  const RIDE_TURN = THREE.MathUtils.degToRad(65);
+  function seatOf(id, t) {
+    const m = motion.get(id); if (!m) return null;
+    const ahead = live() ? Math.min(Math.max(t - m.time, 0), .8) : 0;
+    return m.seat.map((v, i) => v + m.velocity[i] * ahead);
+  }
+  function mount(id) {
+    const seat = seatOf(id, performance.now() / 1000); if (!seat) { say(`${id} is not visible.`); return; }
+    const cam = current?.camera?.origin || [0, 0, 0];
+    actor.move = null;
+    riding = {id, start: performance.now() / 1000, from: actor.root.position.clone(), turn: seat[0] < cam[0] ? -RIDE_TURN : RIDE_TURN};
+    stage.gesture('idle'); disposeGroup(pathLine); rideTick(performance.now() / 1000);
+    say(`Riding ${id} (seated on the silhouette's body top at ${seat[1].toFixed(2)} m, tracking it).`);
+  }
+  function rideTick(t) {
+    if (!riding) return;
+    const seat = seatOf(riding.id, t); if (!seat) return;  // object briefly lost: keep the last seat
+    const k = Math.min(1, (t - riding.start) / .45), ease = k * k * (3 - 2 * k), target = new THREE.Vector3(seat[0], 0, -seat[2]);
+    if (k < 1) actor.root.position.lerpVectors(riding.from, target, ease); else actor.root.position.copy(target);
+    // Turned 65° from the camera, away from the image centre: the bent legs read in
+    // profile and hang just in front of the object's depth-only occluder.
+    const cam = current?.camera?.origin || [0, 0, 0];
+    actor.root.rotation.y = Math.atan2(cam[0] - seat[0], seat[2] - cam[2]) + riding.turn;
+    // sit() takes the seat in the root's unscaled units; the feet target adds the
+    // rig's unscaled ankle height, so convert the wanted world foot height.
+    const s = scaleOf(), ankle = actor.rig?.metrics?.ankleY || 0;
+    if (typeof stage.sit === 'function') stage.sit({seatHeight: seat[1] / s, floorHeight: seat[1] * .35 + ankle * s - ankle, handsOnLap: true});
+    else actor.root.position.y = seat[1];
   }
   function reach(point, side = 'auto') {
     if (typeof stage.reachTo === 'function') return stage.reachTo(side, point);
@@ -340,9 +401,9 @@ export function start(Avatar) {
     const id = selected, m = meshById(id); if (!m) { say(`${id} is not visible.`); return; }
     if (kind !== 'follow') { walkToken++; timers.forEach(clearTimeout); timers = []; following = null; $('#follow').setAttribute('aria-pressed', 'false'); }
     release();
-    if (kind === 'point') { standUp(); face(m.interaction_targets.point); stage.pointAt(m.interaction_targets.point.map((v, i) => i === 2 ? -v : v)); if (stage.lookAt) stage.lookAt(w2t(m.interaction_targets.point)); later(() => stage.gesture('idle'), 3500); say(`Pointing at ${id}.`); return; }
+    if (kind === 'point') { dismount(); face(m.interaction_targets.point); stage.pointAt(m.interaction_targets.point.map((v, i) => i === 2 ? -v : v)); if (stage.lookAt) stage.lookAt(w2t(m.interaction_targets.point)); later(() => stage.gesture('idle'), 3500); say(`Pointing at ${id}.`); return; }
     if (kind === 'follow') {
-      following = following === id ? null : id; $('#follow').setAttribute('aria-pressed', String(Boolean(following)));
+      following = following === id ? null : id; followGoal = null; $('#follow').setAttribute('aria-pressed', String(Boolean(following)));
       if (following) replanFollow(); else stopAll(); return;
     }
     goTo(id, kind, targets => {
@@ -357,15 +418,7 @@ export function start(Avatar) {
         if (typeof stage.reachTo === 'function') { stage.reachTo('left', p.clone().add(right)); stage.reachTo('right', p.clone().sub(right)); } else reach(p);
         later(() => { release(); stage.gesture('idle'); }, 2600); say(`Pushing ${id}.`); return;
       }
-      if (kind === 'ride') {
-        const top = targets.ride; stage.gesture('idle'); stage.moveTo(top[0], -top[2], .45);
-        later(() => {
-          face([top[0] + 1, 0, top[2] - .4]); riding = true;  // side-on, so the seated legs read in the camera image
-          if (typeof stage.sit === 'function') stage.sit({seatHeight: top[1] / scaleOf(), floorHeight: top[1] * .35, handsOnLap: true});
-          else actor.root.position.y = top[1];
-          say(`Riding ${id} (seated on the silhouette's body top at ${top[1].toFixed(2)} m).`);
-        }, 480);
-      }
+      if (kind === 'ride') mount(id);  // the live seat, not the plan-time target: the object may have moved meanwhile
     }).catch(e => say(e.message));
   }
   for (const kind of ['point', 'approach', 'follow', 'pet', 'push', 'ride']) $('#' + kind).onclick = () => act(kind);
@@ -382,9 +435,10 @@ export function start(Avatar) {
     const t = now / 1000;
     if (live()) drawFrame(t);
     actor.root.scale.setScalar(scaleOf());
+    rideTick(t);
     if (now - lastUpdate > 650) update(false, t);
     requestAnimationFrame(tick);
   }
   setSource('sample'); requestAnimationFrame(tick);
-  window.silhouetteDemo = {stage, select, act, command, get current() { return current; }, get selected() { return selected; }, get following() { return following; }};
+  window.silhouetteDemo = {stage, select, act, command, get current() { return current; }, get selected() { return selected; }, get following() { return following; }, get riding() { return riding?.id || null; }};
 }

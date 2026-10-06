@@ -97,9 +97,9 @@ The demo opens on an animated sample scene: a drawn floor with two toy bears and
 - **Interactions:**
   - *Point* aims the arm.
   - *Approach* walks the A* path to the standing point.
-  - *Follow* re-plans after every update.
+  - *Follow* re-plans after every update toward a point beside the object, outside its footprint by the clearance plus the avatar's body radius. The path keeps the same stand-off, so the avatar does not walk into or stand in front of the object.
   - *Pet* and *Push* walk to the standing point, then reach with two-bone IK: one hand on the body top, or both hands on the mid-height.
-  - *Ride* moves the avatar onto the silhouette's body top and seats it.
+  - *Ride* seats the avatar on the tracked silhouette's body top. The seat is re-read on every update and carried between updates, so the avatar stays on a moving object until *Stop* or another action. *Stop* steps the avatar off.
 - **Camera sources.**
   - *Webcam* uses `getUserMedia`.
   - *Image or video file* plays an uploaded file.
@@ -204,7 +204,8 @@ The mesh is therefore a camera-centred, equal-distance surface: not a plane, and
 **Walking and touching (Sections 5.2–5.3).**
 - `plan_on_floor` rasterises the footprints as holes dilated by the clearance and runs 8-connected A* with an octile heuristic and no corner cutting, then string-pulls the path.
 - The standing point for approach, pet and push starts at the centre of the un-walkable area and moves toward the camera until it is outside the dilated hole.
-- `body_top` (the highest mask row at least half as wide as the widest row) gives the pet and ride targets without landing on a thin ear.
+- `body_top` (the highest mask row at least half as wide as the widest row) gives the pet and ride targets without landing on a thin ear. `ride_seat` keeps that height and slides the seat 3 cm inside the floor footprint, because the leaning equal-distance mesh puts its top near the footprint's far edge.
+- `follow_point` stands beside the object as seen from the camera, turned 30° toward it, on the side the avatar already occupies. For following, the plan dilates every footprint by the clearance plus the body radius.
 
 **Occlusion.** `occlusion_composite` remains as a 2D per-pixel mask or depth compositor for offline outputs. The browser uses the meshes themselves as depth-only occluders.
 
@@ -215,7 +216,8 @@ The mesh is therefore a camera-centred, equal-distance surface: not a plane, and
 - COCO polygon and RLE conversion, self-labelled and synthetic routes, augmentation alignment, and the learning-rate schedule;
 - a two-epoch train, ONNX export and its parity with PyTorch;
 - the regression inputs from the code audit: a 90° yaw footprint, a reachable standing point, skipped bad instances, YOLO letterbox polygons and the octile heuristic;
-- persistent ids under motion, ray-cast and keyword selection, and the demo's frame, plan and select handlers.
+- persistent ids under motion, ray-cast and keyword selection, and the demo's frame, plan and select handlers;
+- the follow stand-off and path clearance around a moving object, and the ride seat inside the footprint at the body top.
 
 `python scripts/verify.py` writes inspectable mesh, occlusion, update-loop and path outputs under `outputs/verify/`.
 
