@@ -55,6 +55,9 @@ Please cite the research paper when using its ideas; [download the BibTeX citati
 <!-- demo-preview:start -->
 ## Demo preview
 
+> [!IMPORTANT]
+> **Independent re-implementation, not the original system.** The original code, assets and trained models from this research cannot be shared, so this repository rebuilds the published method from the paper using publicly available data, open-source tools and newly made CC0 avatars. The look, motion, voices and accuracy in this demo reflect that substitute tooling and small demo-scale data; they are not representative of the quality of the original work. To see the original system and its reported results, please refer to the [published paper](https://doi.org/10.3390/app11062763) and the [original demo video](https://www.youtube.com/watch?v=75P9iV8M8e8).
+
 ![Silhouette Mobile Ar runnable demo](demo-assets/preview.png)
 
 *Local demo with small starter examples; the capture illustrates the interface, not a reproduced paper benchmark.*
